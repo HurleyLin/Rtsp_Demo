@@ -37,6 +37,10 @@ do{\
 	printf("\033[0;39m\n");\
 }while(0)
 
+
+#define __LINUX__ 1
+
+
 #ifdef __WIN32__
 #include <winsock2.h>
 #define MSG_DONTWAIT 0
