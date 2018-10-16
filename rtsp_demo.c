@@ -134,3 +134,38 @@ static struct rtsp_client_connection *__alloc_client_connection (struct rtsp_dem
 	}
 	return cc;
 }
+
+static void _free_client_connection (struct rtsp_client_connection *cc)
+{
+	if (cc) {
+		struct rtsp_demo *d  = cc->demo;
+		TAILQ_REMOVE(&d->connections_qhead, cc,demo_entry);
+		free(cc);
+	}
+}
+
+static void __client_connection_bind_session(struct rtsp_client_connection *cc, struct rtsp_session *s)
+{
+	if (cc->session == NULL) {
+		cc->session = s;
+		TAILQ_INSERT_TAIL(&s->connections_qhead, cc, session_entry);
+	}
+}
+
+static void __client_connect_unbind_session(struct rtsp_client_connection *cc)
+{
+	struct rtsp_session *s = cc->session;
+	if (s) {
+		TAILQ_REMOVE(&s->connections_qhead, cc,session_entry);
+		cc->session = NULL
+	}
+}
+
+
+
+
+
+
+
+
+
