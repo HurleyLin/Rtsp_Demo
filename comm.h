@@ -15,25 +15,25 @@
 
 #define dbg(fmt,arg ...) \
 do{\
-	printf("\033[1;33m[DEBUG %s:%s:%d]"fmt,__FILE__,__FUNCTION__,__LINE__,##_arg);\
+	printf("\033[1;33m[DEBUG %s:%s:%d]:"fmt,__FILE__,__FUNCTION__,__LINE__,##arg);\
 	printf("\033[0;39m\n");\
 }while(0)
 
 #define info(fmt,arg ...) \
 do{\
-	printf("\033[1;32m[INFO %s:%s:%d]"fmt,__FILE__,__FUNCTION__,__LINE__,##_arg);\
+	printf("\033[1;32m[INFO %s:%s:%d]:"fmt,__FILE__,__FUNCTION__,__LINE__,##arg);\
 	printf("\033[0;39m\n");\
 }while(0)
 
 #define warn(fmt,arg ...) \
 do{\
-	printf("\033[1;34m[WARN %s:%s:%d]"fmt,__FILE__,__FUNCTION__,__LINE__,##_arg);\
+	printf("\033[1;34m[WARN %s:%s:%d]:"fmt,__FILE__,__FUNCTION__,__LINE__,##arg);\
 	printf("\033[0;39m\n");\
 }while(0)
 
 #define ERR(fmt,arg ...) \
 do{\
-	printf("\033[1;31m[ERROR %s:%s:%d]"fmt,__FILE__,__FUNCTION__,__LINE__,##_arg);\
+	printf("\033[1;31m[ERROR %s:%s:%d]:"fmt,__FILE__,__FUNCTION__,__LINE__,##arg);\
 	printf("\033[0;39m\n");\
 }while(0)
 
