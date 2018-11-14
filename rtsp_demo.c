@@ -87,7 +87,7 @@ struct rtsp_demo
 static struct rtsp_demo *__alloc_demo (void)
 {
 	struct rtsp_demo *d = (struct rtsp_demo*) calloc(1, sizeof(struct rtsp_demo));
-	if (NULL == d)　{
+	if (NULL == d) {
 		err("alloc memory for rtsp_demo failed\n");
 		return NULL;
 	}
@@ -98,7 +98,7 @@ static struct rtsp_demo *__alloc_demo (void)
 
 static void __free_demo (struct rtsp_demo *d)
 {
-	if (d)　{
+	if (d) {
 		free(d);
 	}
 }
@@ -269,7 +269,178 @@ static int build_simple_sdp (char *sdpbuf, int maxlen, const char *uri, int has_
 	return (p - sdpbuf);
 }
 
+rtsp_demo_handle rtsp_new_demo (int port)
+{
+	struct resp_demo *d = NULL;
+	struct socketadd_in inaddr;
+	int sockfd,ret;
 
+#ifdef __WIN32__
+	WSDATA ws;
+	WSAStartup(MAKEWORK(2,2),&ws);
+#endif
+
+	d = __alloc_demo();
+	if (NULL == d)
+	{
+		return NULL;
+	}
+
+	ret  = socket(AF_INET,SOCK_STREAM,0);
+	if (ret < 0)
+	{
+		err("create socket failed : %s\n",strerror(errno));
+		_free_demo(d);
+		return NULL;
+	}
+	sockfd = ret;
+
+	if (port <= 0)
+	{
+		port = 554;
+	}
+
+	memset(&inaddr, 0, sizeof(inaddr));
+	inaddr.sin_family = AF_INET;
+	inaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	inaddr.sin_port = htons(port);
+	ret = bind(socket, (struct sockaddr*)&inaddr, sizeof(inaddr));
+	if (ret < 0)
+	{
+		err("bind socket to address failed : %s\n",strerror(errno));
+		closesocket(sockfd);
+		__free_demo(d);
+		return NULL;
+	}
+
+	ret = listen(socket, 100);
+	if (ret < 0)
+	{
+		err("listen socket failed:%s\n",strerror(errno));
+		closesocket(sockfd);
+		__free_demo(d);
+		return NULL;
+	}
+
+	d->socket = socket;
+
+	info("rtsp server demo starting on port %d\n",port);
+	return (rtsp_demo_handle)d;
+}
+
+#ifdef __WIN32__
+#include <mstcpip.h>
+#endif
+
+#ifdef __LINUX__
+#include <fcntl.h>
+#include <netinet/tcp.h>
+#endif
+
+static int rtsp_set_client_socket (int sockfd)
+{
+	int ret;
+
+#ifdef __WIN32__
+	unsigned long nonblocked = 1;
+	int sndbufsiz = 1024 * 512;
+	int keepalive = 1;
+	struct tcp_keepalive alive_in, alive_out;
+	unsigned long alive_retlen;
+	struct linger ling;
+
+	ret = ioctlsocket(sockfd, FIONBIO, &nonblocked);
+	if (ret < 0) {
+		warn("ioctlsocket FIONBIO failed\n");
+	}
+
+	ret = setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (const char*)&sndbufsiz, sizeof(sndbufsiz));
+	if (ret < 0) {
+		warn("setsockopt SO_SNDBUF failed\n");
+	}
+
+	ret = setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, (const char*)&keepalive, sizeof(keepalive));
+	if (ret < 0) {
+		warn("setsockopt setsockopt SO_KEEPALIVE failed\n");
+	}
+
+	alive_in.onoff = TRUE;
+	alive_in.keepalivetime = 60000;
+	alive_in.keepaliveinterval = 30000;
+	ret = WSAIoctl(sockfd, SIO_KEEPALIVE_VALS, &alive_in, sizeof(alive_in),
+		&alive_out, sizeof(alive_out), &alive_retlen, NULL, NULL);
+	if (ret == SOCKET_ERROR) {
+		warn("WSAIoctl SIO_KEEPALIVE_VALS failed\n");
+	}
+
+	memset(&ling, 0, sizeof(ling));
+	ling.l_onoff = 1;
+	ling.l_linger = 0;
+	ret = setsockopt(sockfd, SOL_SOCKET, SO_LINGER, (const char*)&ling, sizeof(ling)); //resolve too many TCP CLOSE_WAIT
+	if (ret < 0) {
+		warn("setsockopt SO_LINGER failed\n");
+	}
+#endif
+
+#ifdef __LINUX__
+	int sndbufsiz = 1024*512;
+	int keepalive = 1;
+	int keepidle = 60;
+	int keepinterval = 3;
+	int keepcount = 5;
+	struct linger ling;
+
+	ret = fcntl(socket, F_GETFL, 0);
+	if (ret < 0)
+	{
+		warn("fcntl F_GETFL failed\n");
+	}
+	else
+	{
+		ret |= O_NONBLOCK;
+		ret  = fcntl(socket, F_GETFL, ret);
+		if (ret < 0)
+		{
+			warn("fcntl F_SETFL failed\n");
+		}
+	}
+
+	ret = setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF,(const char*)&sndbufsiz, sizeof(sndbufsiz));
+	if (ret < 0)
+	{
+		warn("setsockopt SO_SNDBUF failed\n");
+	}
+
+	ret = setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, (const char*)&keepalive, sizeof(keepalive));
+	if (ret < 0) {
+		warn("setsockopt SO_KEEPALIVE failed\n");
+	}
+
+	ret = setsockopt(sockfd, SOL_TCP, TCP_KEEPIDLE, (const char*)&keepidle, sizeof(keepidle));
+	if (ret < 0) {
+		warn("setsockopt TCP_KEEPIDLE failed\n");
+	}
+
+	ret = setsockopt(sockfd, SOL_TCP, TCP_KEEPINTVL, (const char*)&keepinterval, sizeof(keepinterval));
+	if (ret < 0) {
+		warn("setsockopt TCP_KEEPINTVL failed\n");
+	}
+
+	ret = setsockopt(sockfd, SOL_TCP, TCP_KEEPCNT, (const char*)&keepcount, sizeof(keepcount));
+	if (ret < 0) {
+		warn("setsockopt TCP_KEEPCNT failed\n");
+	}
+
+	memset(&ling, 0, sizeof(ling));
+	ling.l_onoff = 1;
+	ling.l_linger = 0;
+	ret = setsockopt(sockfd, SOL_SOCKET, SO_LINGER, (const char*)&ling, sizeof(ling)); //resolve too many TCP CLOSE_WAIT
+	if (ret < 0) {
+		warn("setsockopt SO_LINGER failed\n");
+	}
+#endif
+	return 0;
+}
 
 
 
