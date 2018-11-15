@@ -15,10 +15,11 @@
 #include <stdint.h>
 
 #include "comm.h"
+#include "queue.h"
 #include "rtsp_demo.h"
 #include "rtsp_msg.h"
 #include "rtp_enc.h"
-#include "queue.h"
+
 
 struct resp_session;
 struct stsp_client_connection;
@@ -442,6 +443,160 @@ static int rtsp_set_client_socket (int sockfd)
 	return 0;
 }
 
+static struct rtsp_client_connection *rtsp_new_client_connection (struct rtsp_demo *d)
+{
+	struct rtsp_client_connection *cc = NULL;
+	struct sockaddr_in inaddr;
+	int sockfd;
+	socklen_t addrlen = sizeof(inaddr);
 
+	int ret = accept(d->sockfd, (struct sockaddr*)&inaddr, &addrlen);
+	if (ret < 0)
+	{
+		err("accept failed :%s\n",strerror(errno));
+		return NULL;
+	}
 
+	sockfd = ret;
+	rtsp_set_client_socket(sockfd);
+	info("new rtsp client %s:%u coming\n",inet_ntoa(inaddr.sin_addr,ntohs(inaddr.sin_port)));
 
+	cc = __alloc_client_connection(d);
+	if (cc == NULL)
+	{
+		closesocket(sockfd);
+		return NULL;
+	}
+
+	cc->state = RTSP_CC_STATE_INIT;
+	cc->sockfd = sockfd;
+
+	return cc;
+}
+
+static void rtsp_del_rtp_connection(struct rtsp_client_connection *cc, int isaudio);
+static void rtsp_del_client_connection(struct rtsp_client_connection *cc)
+{
+	if (cc)
+	{
+		info("delete client %d\n",cc->sockfd);
+		__client_connection_ubind_session(cc);
+		rtsp_del_rtp_connection(cc,0);
+		rtsp_del_rtp_connection(cc,1);
+		closesocket(cc->sockfd);
+		__free_client_conection(cc);
+	}
+}
+
+rtsp_session_handle rtsp_new_session (rtsp_demo_handle demo,const char *path,int has_video,int has_audio)
+{
+	struct rtsp_demo *d = (struct rtsp_demo*)demo;
+	struct rtsp_session *s = NULL;
+
+	if(!d || !path || strlen(path) == 0 || (has_video == 0 && has_audio == 0))
+	{
+		err("param invalid\n");
+		return NULL;
+	}
+
+	TAILQ_FOREACH(s,&d->session_qhead,demo_entry)
+	{
+		if (strstr(path, s->path) || strstr(s->path,path))
+		{
+			err("has likely path:%s (%s)\n",s->path,path);
+			return NULL;
+		}
+	}
+
+	s= __alloc_session(d);
+	if(NULL == d)
+	{
+		return NULL;
+	}
+
+	strncpy(s->path,path,sizeof(s->path) - 1);
+	s->has_video = !!has_video;
+	s->has_audio = !!has_audio;
+
+#define RTP_MAX_PKTSIZ ((1500-42)/4*4)
+#define RTP_MAX_NBPKTS (300)
+	if (s->has_audio)
+	{
+		s->artpe.ssrc = 0;
+		s->artpe.seq = 0;
+		s->artpe.pt = 97;
+		s->artpe.sample_rate = 8000;
+		rtp_enc_init(&s->artpe, RTP_MAX_PKTSIZ, 5);
+	}
+	if (s->has_video)
+	{
+		s->vrtpe.ssrc = 0;
+		s->vrtpe.seq = 0;
+		s->vrtpe.pt = 96;
+		s->vrtpe.sample_rate = 90000;
+		rtp_enc_init(&s->vrtpe, RTP_MAX_PKTSIZ, RTP_MAX_NBPKTS);
+	}
+
+	info("add session path:%s\n",s->path);
+	return (rtsp_session_handle)s;
+}
+
+void rtsp_del_session (rtsp_session_handle session)
+{
+	struct rtsp_session *s = (struct rtsp_session*)session;
+	if (s)
+	{
+		struct rtsp_client_connection *cc;
+		while((cc = TAILQ_FIRST(&s->connection_qhead)))
+		{
+			rtsp_del_client_connection(cc);
+		}
+
+		info("del session path:%s\n",s->path);
+		if (s->has_video)
+		{
+			rtp_enc_deinit(&s->vrtpe);
+		}
+		if (s->has_audio)
+		{
+			rtp_enc_deinit(&s->artpe);
+		}
+
+		__free_session(s);
+	}
+}
+
+void rtsp_del_demo (rtsp_demo_handle demo)
+{
+	struct rtsp_demo *d = (struct rtsp_demo*)demo;
+	if (d)
+	{
+		struct rtsp_session *s;
+		struct rtsp_client_connection *cc;
+
+		while ((cc = TAILQ_FIRST(&d->connections_qhead))) {
+			rtsp_del_client_connection(cc);
+		}
+		while ((s = TAILQ_FIRST(&d->sessions_qhead))) {
+			rtsp_del_session(s);
+		}
+
+		closesocket(d->sockfd);
+		__free_demo(d);
+	}
+}
+
+static int rtsp_handle_OPTIONS(struct rtsp_client_connection *cc,const rtsp_msg_s *reqmsg, rtsp_msg_s *resmsg)
+{
+	uint32_t public_ = 0;
+	dbg("\n");
+	public_ |= RTSP_MSG_PUBLIC_OPTIONS;
+	public_ |= RTSP_MSG_PUBLIC_DESCRIBE;
+	public_ |= RTSP_MSG_PUBLIC_SETUP;
+	public_ |= RTSP_MSG_PUBLIC_PAUSE;
+	public_ |= RTSP_MSG_PUBLIC_PLAY;
+	public_ |= RTSP_MSG_PUBLIC_TEARDOWN;
+	rtsp_msg_set_public(resmsg, public_);
+	return 0;
+
+}
