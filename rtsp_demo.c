@@ -56,10 +56,10 @@ struct rtp_connection
 struct rtsp_client_connection
 {
 	int state;
-#define RTSP_CC_STATE_INIT			0;
-#define RTSP_CC_STATE_READY			1;
-#define RTSP_CC_STATE_PLAYING		2;
-#define RTSP_CC_STATE_RECORDING		3;
+#define RTSP_CC_STATE_INIT			0
+#define RTSP_CC_STATE_READY			1
+#define RTSP_CC_STATE_PLAYING		2
+#define RTSP_CC_STATE_RECORDING		3
 
 	int sockfd;					//rtsp client socket
 	unsigned long session_id;	//session id
@@ -68,7 +68,7 @@ struct rtsp_client_connection
 	int reqlen;
 
 	struct rtp_connection *vrtp;
-	struct rtp_connection *vrtp;
+	struct rtp_connection *artp;
 
 	struct rtsp_demo *demo;
 	struct rtsp_session *session;
@@ -725,6 +725,224 @@ static int __rtsp_rtcp_socket(int *rtpsock, int *rtcpsock, const char *peer_ip, 
 	err("not found free local port for rtp/rtcp\n");
 	return -1;
 }
+
+static int rtsp_new_rtp_connection(struct rtsp_client_connection *cc, const char *peer_ip, int peer_port_interleaved, int isaudio, int istcp)
+{
+	struct rtp_connection *rtp;
+	int ret;
+
+	rtp = (struct rtp_connection) calloc(1, sizeof(struct rtp_connection));
+	if (rtp == NULL)
+	{
+		err("alloc mem for rtp session failed:%s\n",strerror(errno));
+		return -1;
+	}
+
+	rtp->is_over_tcp = istcp;
+	rtp->ssrc = __rtp_gen_ssrc();
+
+	if (istcp)
+	{
+		rtp->udp_sockfd = cc->sockfd;
+		rtp->tcp_interleaved = peer_port_interleaved;
+		ret = rtp->tcp_interleaved;
+	}
+	else
+	{
+		int rtpsock, rtcpsock;
+		ret = __rtp_rtcp_socket(&rtpsock, &rtcpsock, peer_ip, peer_port_interleaved);
+		if (ret < 0)
+		{
+			free(rtp);
+			return -1;
+		}
+
+		rtp->udp_sockfd[0] = rtpsock;
+		rtp->udp_sockfd[1] = rtcpsock;
+	}
+
+	if (isaudio)
+		cc->artp = rtp;
+	else
+		cc->vrtp = rtp;
+
+	info("rtsp session %081X new %s %d-%d %s\n",cc->session_id,
+			(isaudio ? "artp" : "vrtp"),
+			ret, ret + 1,
+			(istcp ? "OverTCP" : "OverUDP"));
+	return ret;
+}
+
+static void rtsp_del_rtp_connection(struct rtsp_client_connection *cc,int isaudio)
+{
+	struct rtp_connection *rtp;
+
+	if (isaudio)
+	{
+		rtp = cc->artp;
+		cc->artp = NULL;
+	}
+	else
+	{
+		rtp = cc->vrtp;
+		cc->vrtp = NULL;
+	}
+
+	if (rtp)
+	{
+		if (!rtp->is_over_tcp)
+		{
+			closesocket(rtp->udp_sockfd[0]);
+			closesocket(rtp->udp_sockfd[1]);
+		}
+		free(rtp);
+	}
+}
+
+static const char *__get_peer_ip(int sockfd)
+{
+	struct sockaddr_in inaddr;
+	socklen_t addrlen = sizeof(inaddr);
+	int ret = getpeername(sockfd,(struct sockaddr*)&inaddr, &addrlen);
+	if (ret < 0)
+	{
+		err("getpeername failed:%s\n",strerror(errno));
+		return NULL;
+	}
+	return inet_ntoa(inaddr.sin_addr);
+}
+
+static int rtsp_handle_SETUP(struct rtsp_client_connection *cc, const rtsp_msg_s *reqmsg, rtsp_msg_s *resmsg)
+{
+	struct rtsp_session *s = cc->session;
+	uint32_t ssrc = 0;
+	int istcp = 0, isaudio = 0;
+	char vpath[64] = "";
+	char apath[64] = "";
+
+	dgb("\n");
+	if (cc->state != RTSP_CC_STATE_INIT && cc->state != RTSP_CC_STATE_READY)
+	{
+		rtsp_msg_set_response(resmsg, 455);
+		warn("rtsp status err\n");
+		return 0;
+	}
+
+	if(!reqmsg->hdrs.transport)
+	{
+		rtsp_msg_set_response(resmsg, 461);
+		warn("rtsp no transport err\n");
+		return 0;
+	}
+
+	if (reqmsg->hdrs.transport->type = RTSP_MSG_TRANSPORT_TYPE_RTP_AVP_TCP)
+	{
+		istcp = 1;
+		if (!reqmsg->hdrs.transport->flags & RTSP_MSG_TRANSPORT_FLAG_INTERLEAVED)
+		{
+			warn("rtsp no interleaved err\n");
+			rtsp_msg_set_response(resmsg, 461);
+			return 0;
+		}
+	}
+	else
+	{
+		if (!(reqmsg->hdrs.transport->flags & RTSP_MSG_TRANSPORT_FLAG_CLIENT_PORT))
+		{
+			warn("rtsp no client_port err\n");
+			rtsp_msg_set_response(resmsg, 461);
+			return 0;
+		}
+	}
+
+	snprintf(vpath, sizeof(vpath) - 1,"%s/track1", s->path);
+	snpeintf(apath,sizeof(apath) - 1,"%s/track2", s->path);
+	if (s->has_video && 0 == strncmp(reqmsg->hdrs.startline.reqline.uri.abspath, vpath, strlen(vpath)))
+	{
+		isaudio = 0;
+	}
+	else if (s->has_audio && 0 == strncmp(reqmsg->hdrs.startline.reqline.uri.abspath, apath, strlen(apath))) {
+		isaudio = 1;
+	}
+	else
+	{
+		warn("rtsp urlpath:%s err\n", reqmsg->hdrs.startline.reqline.uri.abspath);
+		rtsp_msg_set_response(resmsg, 461);
+		return 0;
+	}
+
+	rtsp_del_rtp_connection(cc, isaudio);
+
+	if (istcp)
+	{
+		int ret = rtsp_new_rtp_connection(cc, __get_peer_ip(cc->sockfd),
+				reqmsg->hdrs.transport->interleaved, isaudio, 1);
+		if (ret < 0)
+		{
+			rtsp_msg_set_response(resmsg, 500);
+			return 0;
+		}
+
+		ssrc = isaudio ? cc->artp->ssrc : cc->vrtp->ssrc;
+		rtsp_msg_transport_response(resmsg, ssrc,reqmsg->hdrs.transport->interleaved);
+	}
+	else
+	{
+		int ret = rtsp_new_rtp_connection(cc, __get_peer_ip(cc->sockfd),
+			reqmsg->hdrs.transport->client_port, isaudio, 0);
+		if (ret < 0) {
+			rtsp_msg_set_response(resmsg, 500);
+			return 0;
+		}
+		ssrc = isaudio ? cc->artp->ssrc : cc->vrtp->ssrc;
+		rtsp_msg_set_transport_udp(resmsg, ssrc,
+				reqmsg->hdrs.transport->client_port, ret);
+	}
+
+	if (cc->state == RTSP_CC_STATE_INIT)
+	{
+		cc->state = RTSP_CC_STATE_READY;
+		cc->session_id = rtsp_msg_gen_session_id();
+		rtsp_msg_set_session(resmsg, cc->session_id);
+	}
+
+	return 0;
+
+}
+
+static int rtsp_handle_PAUSE(struct rtsp_client_connection *cc, const rtsp_msg_s *reqmsg, rtsp_msg_s *resmsg)
+{
+	if (cc->state != RTSP_CC_STATE_READY && cc->state != RTSP_CC_STATE_PLAYING)
+	{
+		rtsp_msg_set_response(resmsg, 455);
+		warn("rtsp status err\n");
+		return 0;
+	}
+
+	if (cc->state != RTSP_CC_STATE_READY)
+		cc->state = RTSP_CC_STATE_READY;
+	return 0;
+}
+
+static int rtsp_handle_PLAY(struct rtsp_client_connection *cc, const rtsp_msg_s *reqmsg, rtsp_msg_s *resmsg)
+{
+	dbg("\n");
+	if (cc->state != RTSP_CC_STATE_READY && cc->state != RTSP_CC_STATE_PLAYING)
+	{
+		rtsp_msg_set_response(resmsg, 455);
+		warn("rtsp status err\n");
+		return 0;
+	}
+
+	if (cc->state != RTSP_CC_STATE_PLAYING)
+		cc->state = RTSP_CC_STATE_PLAYING;
+	return 0;
+}
+
+
+
+
+
 
 
 
