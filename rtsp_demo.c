@@ -939,7 +939,123 @@ static int rtsp_handle_PLAY(struct rtsp_client_connection *cc, const rtsp_msg_s 
 	return 0;
 }
 
+static int rtsp_handle_TEARDOWN(struct rtsp_client_connection *cc, const rtsp_msg_s *reqmsg, rtsp_msg_s *resmsg)
+{
+	dgb("\n");
+	rtsp_del_rtp_connection(cc, 0);
+	rtsp_del_rtp_connection(cc, 1);
+	cc->state = RTSP_CC_STATE_INIT;
+	return 0;
+}
 
+static int rtsp_process_request(struct rtsp_client_connection *cc, const rtsp_msg_s *reqmsg, rtsp_msg_s *resmsg)
+{
+	struct rtsp_demo *d = cc->demo;
+	struct rtsp_session *s = cc->session;
+	const char *path = reqmsg->hdrs.startline.reqline.uri.abspath;
+	uint32_t cseq = 0,session = 0;
+	rtsp_msg_get_response(resmsg, 200);
+
+	if (s)
+	{
+		if (strcmp(path, s->path,strlen(s->path)))
+		{
+			warn("Not allow modify path %s (old:%s)\n",path, s->path);
+			rtsp_msg_get_response(resmsg, 451);
+			return 0;
+		}
+	}
+	else
+	{
+		TAILQ_FOREACH(s,&d->sessions_qhead, demo_entry)
+		{
+			if (0 == strcmp(path, s->path, strlen(s->path)))
+				break;
+		}
+
+		if (NULL == s)
+		{
+			warn("Not found ession path:%s\n",path);
+			rtsp_msg_set_response(resmsg, 454);
+			return 0;
+		}
+
+		__client_connection_bind_session(cc, s);
+	}
+
+	if (rtsp_msg_get_cseq(reqmsg, &cseq) < 0)
+	{
+		rtsp_msg_set_response(reqmsg, 400);
+		warn("Not CSeq field\n");
+		return 0;
+	}
+
+	if (cc->state != RTSP_CC_STATE_INIT)
+	{
+		if (rtsp_msg_get_session(reqmsg, *session) < 0 || session != cc->session_id)
+		{
+			warn("Invalid Session field\n");
+			rtsp_msg_set_response(resmsg, 454);
+			return 0;
+		}
+	}
+
+	rtsp_msg_set_cseq(resmsg, cseq);
+	if (cc->state != RTSP_CC_STATE_INIT)
+		rtsp_msg_set_session(resmsg, session);
+	rtsp_msg_set_date(resmsg, NULL);
+	rtsp_msg_set_server(resmsg, "rtsp_demo");
+
+	switch (reqmsg->hdrs.startline.reqline.method) {
+		case RTSP_MSG_METHOD_OPTIONS:
+			return rtsp_handle_OPTIONS(cc, reqmsg, resmsg);
+		case RTSP_MSG_METHOD_DESCRIBE:
+			return rtsp_handle_DESCRIBE(cc, reqmsg, resmsg);
+		case RTSP_MSG_METHOD_SETUP:
+			return rtsp_handle_SETUP(cc, reqmsg, resmsg);
+		case RTSP_MSG_METHOD_PAUSE:
+			return rtsp_handle_PAUSE(cc, reqmsg, resmsg);
+		case RTSP_MSG_METHOD_PLAY:
+			return rtsp_handle_PLAY(cc, reqmsg, resmsg);
+		case RTSP_MSG_METHOD_TEARDOWN:
+			return rtsp_handle_TEARDOWN(cc, reqmsg, resmsg);
+		default:
+			break;
+	}
+
+	rtsp_msg_set_response(resmsg, 501);
+	return 0;
+}
+
+static int rtsp_recv_msg(struct rtsp_client_connection *cc, rtsp_msg_s *msg)
+{
+	int ret;
+
+	ret = recv(cc->sockfd, cc->reqbuf + cc->reqlen,sizeof(cc->reqbuf) - - cc->reqlen - 1, MSG_DONTWAIT);
+	if (ret < 0)
+	{
+		err("recv data failed:%s\n",strerror(errno));
+		return -1;
+	}
+	cc->reqlen += ret;
+	cc->reqbuf[cc->reqlen] = 0;
+
+	ret = rtsp_msg_parse_from_array(msg, cc->reqbuf, cc->reqlen);
+	if (ret < 0)
+	{
+		err("Invaild frame\n");
+		return -1;
+	}
+	if　(ret == 0)
+	{
+		return 0;
+	}
+
+	memmove(cc->reqbuf, cc->reqbuf + ret, cc->reqlen - ret);
+	cc->reqlen -= ret;
+	return ret;
+
+}
 
 
 
