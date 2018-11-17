@@ -856,7 +856,88 @@ int rtsp_msg_frame_size (const void *data, int size)
 //return data's bytes which is parsed. when success
 //return 0. when data is not enough
 //return -1. when data is invalid
+int rtsp_msg_parse_from_array (rtsp_msg_s *msg, const void *data, int size)
+{
+	const char *frame = (const char*)data;
+	const char *p = frame;
+	char line[256];
+	int ret;
 
+	dbg("\n%s",frame);
+	memset(msg, 0, sizeof(rtsp_msg_s));
+
+	//interleaved frmae
+	if (frame[0] == '$')
+	{
+		uint16_t interlen = *((uint16_t*)(p+2));
+		interlen = ntohs(interlen);
+		if (size < interlen + 4)
+		{
+			return 0;
+		}
+
+		msg->type = RTSP_MSG_TYPE_INTERLEAVED;
+		msg->hdrs.startline.interline.channel = *((uint8_t*)(p+1));
+		msg->hdrs.startline.interline.length = interlen;
+		msg->body.body = rtsp_mem_dup((const char*)data + 4,interlen);
+		return (interlen + 4);
+	}
+
+	ret = rtsp_msg_frame_size(data, size);
+	if (ret <= 0)
+		return ret;
+	size = ret;
+
+	p = rtsp_msg_hdr_next_line(p, line, sizeof(line));
+	if (!p)
+		return -1;
+
+	ret = rtsp_msg_parse_startline(msg, line);
+	if (ret < 0)
+		return -1;
+
+	while ((p = rtsp_msg_hdr_next_line(p, line, sizeof(line))))
+	{
+		rtsp_msg_line_parser parser;
+		if (!parser)
+		{
+			warn("unknown line:%s\n",line);
+			continue;
+		}
+
+		ret  = (*parser)(msg, line);
+		if (ret < 0)
+		{
+			err("parse failed. line:%s\n",line);
+			break;
+		}
+	}
+
+	if (!p || strlen(line))
+	{
+		rtsp_msg_free(msg);
+		return -1;
+	}
+
+	if (msg->hdrs.content_length)
+	{
+		msg->body.body = rtsp_mem_dup(p, msg->hdrs.content_length->length);
+		if  (!msg->body.body)
+		{
+			err("set body failed\n");
+			rtsp_msg_free(msg);
+			return -1;
+		}
+	}
+
+	ret = p - frame;
+	if (msg->hdrs.content_length)
+		ret += msg->hdrs.content_length->length;
+	if (ret != size)
+		warn("frame size is %d.but real used %d\n",size,ret);
+
+	return size;
+}
 
 
 
