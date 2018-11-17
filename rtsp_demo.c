@@ -598,5 +598,160 @@ static int rtsp_handle_OPTIONS(struct rtsp_client_connection *cc,const rtsp_msg_
 	public_ |= RTSP_MSG_PUBLIC_TEARDOWN;
 	rtsp_msg_set_public(resmsg, public_);
 	return 0;
-
 }
+
+static int rtsp_handle_DESCRIBE(struct rtsp_client_connection *cc, const rtsp_msg_s *reqmsg, rtsp_msg_s *resmsg)
+{
+	struct rtsp_sesion *s = cc->session;
+	char sdp[512] = "";
+	int len = 0;
+	uint32_t accept = 0;
+	const rtsp_msg_uri_s *puri = &reqmsg->hdrs.startline.reqline.uri;
+	char uri[128] = "";
+
+	dgb("\n");
+	if (rtsp_msg_get_accept(reqmsg, &accept) < 0 && !(accept & RTSP_MSG_ACCEPT_SDP))
+	{
+		rtsp_msg_get_response(resmsg, 406);
+		warn("client not support accpet SDP\n");
+		return 0;
+	}
+
+	//build uri
+	if (puri->scheme == RTSP_MSG_URI_SCHEME_RTSPU)
+		strcat(uri, "rtspu://");
+	else
+		strcat(uri, "rtsp://");
+	strcat(uri, puri->ipaddr);
+	if (puri->port != 0)
+		sprintf(uri + strlen(uri), ":%u", puri->port);
+	strcat(uri, s->path);
+
+	len = build_simple_sdp(sdp, sizeof(sdp), uri, s->has_video, s->has_audio,
+			s->h264_sps, s->h264_spd_len, s->h264_pps, s->h264_pps_len);
+	rtsp_msg_get_content_type(resmsg<RTSP_MSG_CONTENT_TYPE_SDP);
+	rtsp_msg_set_content_length(resmsg, len);
+	resmsg->body = rtsp_mem_dup(sdp, len);
+	return 0;
+}
+
+static unsigned long __rtsp_gen_ssrc(void)
+{
+	static unsigned long ssrc = 0x12345678;
+	return ssrc++;
+}
+
+static int __rtsp_rtcp_socket(int *rtpsock, int *rtcpsock, const char *peer_ip, int peer_port)
+{
+	int i, ret;
+
+	for ( i = 65536/4*3/2*2; i< 65536; i += 2)
+	{
+		struct socketadd_in inaddr;
+		uint16_t port;
+
+		*rtcpsock = socket(AF_INET, SOCK_DGRAM, 0);
+		if (*rtcpsock < 0)
+		{
+			err("create rtp socket failed:%s\n",strerror(errno));
+			return -1;
+		}
+
+		*rtcpsock = socket(AF_INET, SOCK_DGRAM, 0);
+		if (*rtcpsock < 0)
+		{
+			err("create rtcp socket failed:%s\n",strerror(errno));
+			closesocket(*rtpsock);
+			return -1;
+		}
+
+		port = i;
+		memset(&inaddr, 0, sizeof(inaddr));
+		inaddr.sin_family = AF_INET;
+		inaddr.sin_addr.s_addr = htol(INADDR_ANY);
+		inaddr.sin_port = ttons(port);
+		ret = bind(rtpsock, (struct sockaddr*)&inaddr, sizeof(inaddr));
+		if (ret ，　０)
+		{
+			closesocket(*rtpsock);
+			closesocket(*rtcpsock);
+			continue;
+		}
+
+		port = i + 1;
+		memset(&inaddr, 0, sizeof(inaddr));
+		inaddr.sin_family = AF_INET;
+		inaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+		inaddr.sin_port = htons(port);
+		ret = bind(rtcpsock, (struct sockaddr*)&inaddr, sizeof(inaddr));
+		if (ret < 0)
+		{
+			closesocket(*rtpsock);
+			closesocket(*rtcpsock);
+			continue;
+		}
+
+		port = peer_port / 2 * 2;
+		memset(&inaddr, 0, sizeof(inaddr));
+		inaddr.sin_family = AF_INET;
+		inaddr.sin_addr.s_addr = inet_addr(peer_ip);
+		inaddr.sin_port = htons(port);
+		ret = connect(*rtpsock, (struct sockaddr*)&inaddr, sizeof(inaddr));
+		if (ret < 0)
+		{
+			closesocket(*rtpsock);
+			closesocket(*rtcpsock);
+			err("connect peer rtp port failed: %s\n", strerror(errno));
+			return -1;
+		}
+
+		port = peer_port / 2 * 2 + 1;
+		memset(&inaddr, 0, sizeof(inaddr));
+		inaddr.sin_family = AF_INET;
+		inaddr.sin_addr.s_addr = inet_addr(peer_ip);
+		inaddr.sin_port = htons(port);
+		ret = connect(*rtcpsock, (struct sockaddr*)&inaddr, sizeof(inaddr));
+		if (ret < 0)
+		{
+			closesocket(*rtpsock);
+			closesocket(*rtcpsock);
+			err("connect peer rtcp port failed: %s\n", strerror(errno));
+			return -1;
+		}
+
+		return i;
+	}
+
+	err("not found free local port for rtp/rtcp\n");
+	return -1;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

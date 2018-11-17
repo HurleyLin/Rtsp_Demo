@@ -939,16 +939,332 @@ int rtsp_msg_parse_from_array (rtsp_msg_s *msg, const void *data, int size)
 	return size;
 }
 
+//return data's bytes which is used. when success
+//return -1. when failed
+int rtsp_msg_build_to_array (const rtsp_msg_s *msg, void *data, int size)
+{
+	char *frame = (char *)data;
+	char *p = frame;
+	int len;
 
+	//interleaved frame
+	if (msg->type == RTSP_MSG_TYPE_INTERLEAVED)
+	{
+		uint8_t hdr[4];
+		uint16_t interlen = msg->hdrs.startline.interline.length;
+		hdr[0] = '$';
+		hdr[1] = msg->hdrs.startline.interline.channel;
+		*((uint16_t*)(&hdr[2])) = htos(interlen);
+		if (size > 4 + interlen)
+			size = interlen + 4;
+		memcpy(data, hdr, 4);
+		if (msg->body.body)
+			memcpy((char*)data + 4,msg->body.body, size - 4);
+		return size;
+	}
 
+#define MSG_BUILD_STEP() \
+	do { \
+		if (len < 0) \
+			return -1; \
+		p += len; \
+		size -= len; \
+		if (size <= 1) \
+			return (p - frame); \
+	} while(0)
 
+	len = rtsp_msg_build_startline(msg, p, size);;
+	MSG_BUILD_STEP();
 
+#define MSG_BUILD_LINE(_name) \
+	do { \
+		if (msg->hdrs._name) { \
+			len = rtsp_msg_build_##_name(msg, p, size); \
+			MSG_BUILD_STEP(); \
+		} \
+	} while(0)
 
+	MSG_BUILD_LINE(cseq);
+	MSG_BUILD_LINE(date);
+	MSG_BUILD_LINE(session);
+	MSG_BUILD_LINE(transport);
+	MSG_BUILD_LINE(range);
 
+	MSG_BUILD_LINE(accept);
+	MSG_BUILD_LINE(authorization);
+	MSG_BUILD_LINE(user_agent);
 
+	MSG_BUILD_LINE(public_);
+	MSG_BUILD_LINE(rtp_info);
+	MSG_BUILD_LINE(server);
 
+	MSG_BUILD_LINE(content_type);
+	MSG_BUILD_LINE(content_length);
 
+	snprintf(p, size, "\r\n");
+	len = strlen(p);
+	MSG_BUILD_STEP();
 
+	if (msg->hdrs.content_length)
+	{
+		len = msg->hdrs.content_length->length;
+		if (len > size)
+			len = size;
+		memcpy(p, msg->body.body, len);
+		p += len;
+	}
+
+	dbg("\n%s", frame);
+	return (p - frame);
+}
+
+int rtsp_msg_set_request (rtsp_msg_s *msg, rtsp_msg_method_e mt, const char *ipaddr, const char *abspath)
+{
+	msg->type =RTSP_MSG_TYPE_REQUEST;
+	msg->hdrs.startline.reqline.method = mt;
+	msg->hdrs.startline.reqline.uri.scheme = RTSP_MSG_URI_SCHEME_RTSP;
+	strncpy(msg->hdrs.startline.reqline.uri.ipaddr, ipaddr,
+			sizeof(msg->hdrs.startline.reqline.uri.ipaddr) - 1);
+	strncpy(msg->hdrs.startline.reqline.uri.abspath, abspath,
+			sizeof(msg->hdrs.startline.reqline.uri.abspath) - 1);
+	msg->hdrs.startline.reqline.version = RTSP_MSG_VERSION_1_0;
+	return 0;
+}
+
+int rtsp_msg_set_respone (rtsp_msg_s *msg, int status_code)
+{
+	msg->type = RTSP_MSG_TYPE_RESPONSE;
+	msg->hdrs.startline.resline.version = RTSP_MSG_VERSION_1_0;
+	msg->hdrs.startline.resline.status_code = status_code;
+	return 0;
+}
+
+int rtsp_msg_get_cseq (const rtsp_msg_s *msg, uint32_t *cseq)
+{
+	if (!msg->hdrs.cseq)
+		return -1;
+	if (cseq)
+		*cseq = msg->hdrs.cseq->cseq;
+	return 0;
+}
+
+int rtsp_msg_set_cseq (rtsp_msg_s *msg, uint32_t cseq)
+{
+	if (!msg->hdrs.cseq)
+		msg->hdrs.cseq = rtsp_mem_alloc(sizeof(rtsp_msg_cseq_s));
+	if (!msg->hdrs.cseq)
+		return -1;
+	msg->hdrs.cseq->cseq = cseq;
+	return 0;
+}
+
+int rtsp_msg_get_session (const rtsp_msg_s *msg, uint32_t *session)
+{
+	if (!msg->hdrs.session)
+		return -1;
+	if (session)
+		*session = msg->hdrs.session->session;
+	return 0;
+}
+
+int rtsp_msg_set_session (rtsp_msg_s *msg, uint32_t session)
+{
+	if (!msg->hdrs.session)
+		msg->hdrs.session = rtsp_mem_alloc(sizeof(rtsp_msg_session_s));
+	if (!msg->hdrs.session)
+		return -1;
+	msg->hdrs.session->session = session;
+	return 0;
+}
+
+int rtsp_msg_get_date (const rtsp_msg_s *msg, char *date, int len)
+{
+	if (!msg->hdrs.date)
+		return -1;
+	if (date)
+		strncpy(date, msg->hdrs.date->http_date, len - 1);
+	return 0;
+}
+
+int rtsp_msg_set_date (rtsp_msg_s *msg, const char *date)
+{
+	if (!msg->hdrs.date)
+		msg->hdrs.date = rtsp_mem_alloc(sizeof(rtsp_msg_date_s));
+	if (!msg->hdrs.date)
+		return -1;
+	if (date) {
+		strncpy(msg->hdrs.date->http_date, date, sizeof(msg->hdrs.date->http_date) - 1);
+	} else {
+		time_t t = time(NULL);
+		char *p;
+		strncpy(msg->hdrs.date->http_date, ctime(&t),
+				sizeof(msg->hdrs.date->http_date) - 1);
+		p = msg->hdrs.date->http_date;
+		while (isprint(*p)) p++;
+		*p = 0;
+	}
+	return 0;
+}
+
+int rtsp_msg_set_transport_udp (rtsp_msg_s *msg, uint32_t ssrc, int client_port, int server_port)
+{
+	if (!msg->hdrs.transport)
+		msg->hdrs.transport = rtsp_mem_alloc(sizeof(rtsp_msg_transport_s));
+	if (!msg->hdrs.transport)
+		return -1;
+	msg->hdrs.transport->type = RTSP_MSG_TRANSPORT_TYPE_RTP_AVP;
+	msg->hdrs.transport->flags |= RTSP_MSG_TRANSPORT_FLAG_SSRC | RTSP_MSG_TRANSPORT_FLAG_UNICAST;
+	msg->hdrs.transport->ssrc = ssrc;
+	if (client_port >= 0) {
+		msg->hdrs.transport->flags |= RTSP_MSG_TRANSPORT_FLAG_CLIENT_PORT;
+		msg->hdrs.transport->client_port = client_port;
+	}
+	if (server_port >= 0) {
+		msg->hdrs.transport->flags |= RTSP_MSG_TRANSPORT_FLAG_SERVER_PORT;
+		msg->hdrs.transport->server_port = server_port;
+	}
+	return 0;
+}
+
+int rtsp_msg_set_transport_tcp (rtsp_msg_s *msg, uint32_t ssrc, int interleaved)
+{
+	if (!msg->hdrs.transport)
+		msg->hdrs.transport = rtsp_mem_alloc(sizeof(rtsp_msg_transport_s));
+	if (!msg->hdrs.transport)
+		return -1;
+	msg->hdrs.transport->type = RTSP_MSG_TRANSPORT_TYPE_RTP_AVP_TCP;
+	msg->hdrs.transport->flags |= RTSP_MSG_TRANSPORT_FLAG_SSRC;
+	msg->hdrs.transport->ssrc = ssrc;
+	if (interleaved >= 0) {
+		msg->hdrs.transport->flags |= RTSP_MSG_TRANSPORT_FLAG_INTERLEAVED;
+		msg->hdrs.transport->interleaved = interleaved;
+	}
+	return 0;
+}
+
+int rtsp_msg_get_accept (const rtsp_msg_s *msg, uint32_t *accept)
+{
+	if (!msg->hdrs.accept)
+		return -1;
+	if (accept)
+		*accept = msg->hdrs.accept->accept;
+	return 0;
+}
+
+int rtsp_msg_set_accept (rtsp_msg_s *msg, uint32_t accept)
+{
+	if (!msg->hdrs.accept)
+		msg->hdrs.accept = rtsp_mem_alloc(sizeof(rtsp_msg_accept_s));
+	if (!msg->hdrs.accept)
+		return -1;
+	msg->hdrs.accept->accept = accept;
+	return 0;
+}
+
+int rtsp_msg_get_user_agent (const rtsp_msg_s *msg, char *user_agent, int len)
+{
+	if (!msg->hdrs.user_agent)
+		return -1;
+	if (user_agent)
+		strncpy(user_agent, msg->hdrs.user_agent->user_agent, len - 1);
+	return 0;
+}
+
+int rtsp_msg_set_user_agent (rtsp_msg_s *msg, const char *user_agent)
+{
+	if (!msg->hdrs.user_agent)
+		msg->hdrs.user_agent = rtsp_mem_alloc(sizeof(rtsp_msg_user_agent_s));
+	if (!msg->hdrs.user_agent)
+		return -1;
+	if (user_agent) {
+		strncpy(msg->hdrs.user_agent->user_agent, user_agent, sizeof(msg->hdrs.user_agent->user_agent) - 1);
+	} else {
+		strncpy(msg->hdrs.user_agent->user_agent, "rtsp_msg_user_agent",
+				sizeof(msg->hdrs.user_agent->user_agent) - 1);
+	}
+	return 0;
+}
+
+int rtsp_msg_get_public (const rtsp_msg_s *msg, uint32_t *public_)
+{
+	if (!msg->hdrs.public_)
+		return -1;
+	if (public_)
+		*public_ = msg->hdrs.public_->public_;
+	return 0;
+}
+
+int rtsp_msg_set_public (rtsp_msg_s *msg, uint32_t public_)
+{
+	if (!msg->hdrs.public_)
+		msg->hdrs.public_ = rtsp_mem_alloc(sizeof(rtsp_msg_public_s));
+	if (!msg->hdrs.public_)
+		return -1;
+	msg->hdrs.public_->public_ = public_;
+	return 0;
+}
+
+int rtsp_msg_get_server (const rtsp_msg_s *msg, char *server, int len)
+{
+	if (!msg->hdrs.server)
+		return -1;
+	if (server)
+		strncpy(server, msg->hdrs.server->server, len - 1);
+	return 0;
+}
+
+int rtsp_msg_set_server (rtsp_msg_s *msg, const char *server)
+{
+	if (!msg->hdrs.server)
+		msg->hdrs.server = rtsp_mem_alloc(sizeof(rtsp_msg_server_s));
+	if (!msg->hdrs.server)
+		return -1;
+	if (server) {
+		strncpy(msg->hdrs.server->server, server, sizeof(msg->hdrs.server->server) - 1);
+	} else {
+		strncpy(msg->hdrs.server->server, "rtsp_msg_server",
+				sizeof(msg->hdrs.server->server) - 1);
+	}
+	return 0;
+}
+
+int rtsp_msg_get_content_type (const rtsp_msg_s *msg, int *type)
+{
+	if (!msg->hdrs.content_type)
+		return -1;
+	if (type)
+		*type = msg->hdrs.content_type->type;
+	return 0;
+}
+
+int rtsp_msg_set_content_type (rtsp_msg_s *msg, int type)
+{
+	if (!msg->hdrs.content_type)
+		msg->hdrs.content_type = rtsp_mem_alloc(sizeof(rtsp_msg_content_type_s));
+	if (!msg->hdrs.content_type)
+		return -1;
+	msg->hdrs.content_type->type = type;
+	return 0;
+}
+
+int rtsp_msg_get_content_length (const rtsp_msg_s *msg, int *length)
+{
+	if (!msg->hdrs.content_length)
+		return -1;
+	if (length)
+		*length = msg->hdrs.content_length->length;
+	return 0;
+}
+
+int rtsp_msg_set_content_length (rtsp_msg_s *msg, int length)
+{
+	if (!msg->hdrs.content_length)
+		msg->hdrs.content_length = rtsp_mem_alloc(sizeof(rtsp_msg_content_length_s));
+	if (!msg->hdrs.content_length)
+		return -1;
+	msg->hdrs.content_length->length = length;
+	return 0;
+}
 
 
 
