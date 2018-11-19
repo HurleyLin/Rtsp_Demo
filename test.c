@@ -8,13 +8,6 @@
 // Description : Hello World in C++, Ansi-style
 //============================================================================
 
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-#include <fcntl.h>
-#include <time.h>
-
 #include "comm.h"
 #include "rtsp_demo.h"
 
@@ -48,7 +41,7 @@ static int get_next_video_frame(FILE *fp,uint8_t **buff,int *size)
 			i++;
 
 		memcpy(*buff + *size, szbuf, i);
-		*szlen -= i;
+		szlen += i;
 		if (szlen > 3)
 		{
 			fseek(fp, -szlen,SEEK_CUR);
@@ -181,7 +174,7 @@ int main(int argc, char *argv[])
 	}
 
 	ts = os_gettime();
-	sihnal(SIGINT,sig_proc);
+	signal(SIGINT,sig_proc);
 	while(flag_run)
 	{
 		uint8_t type = 0;

@@ -8,12 +8,6 @@
 // Description : Hello World in C++, Ansi-style
 //============================================================================
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
-#include <stdint.h>
-
 #include "comm.h"
 #include "queue.h"
 #include "rtsp_demo.h"
@@ -47,7 +41,7 @@ struct rtsp_session
 struct rtp_connection
 {
 	int is_over_tcp;
-	int tcp_socket;
+	int tcp_sockfd;
 	int tcp_interleaved;
 	int udp_sockfd[2];
 	uint32_t ssrc;
@@ -136,7 +130,7 @@ static struct rtsp_client_connection *__alloc_client_connection (struct rtsp_dem
 	return cc;
 }
 
-static void _free_client_connection (struct rtsp_client_connection *cc)
+static void __free_client_connection (struct rtsp_client_connection *cc)
 {
 	if (cc) {
 		struct rtsp_demo *d  = cc->demo;
@@ -153,7 +147,7 @@ static void __client_connection_bind_session(struct rtsp_client_connection *cc, 
 	}
 }
 
-static void __client_connect_unbind_session(struct rtsp_client_connection *cc)
+static void __client_connection_unbind_session(struct rtsp_client_connection *cc)
 {
 	struct rtsp_session *s = cc->session;
 	if (s) {
@@ -272,8 +266,8 @@ static int build_simple_sdp (char *sdpbuf, int maxlen, const char *uri, int has_
 
 rtsp_demo_handle rtsp_new_demo (int port)
 {
-	struct resp_demo *d = NULL;
-	struct socketadd_in inaddr;
+	struct rtsp_demo *d = NULL;
+	struct sockaddr_in inaddr;
 	int sockfd,ret;
 
 #ifdef __WIN32__
@@ -291,7 +285,7 @@ rtsp_demo_handle rtsp_new_demo (int port)
 	if (ret < 0)
 	{
 		err("create socket failed : %s\n",strerror(errno));
-		_free_demo(d);
+		__free_demo(d);
 		return NULL;
 	}
 	sockfd = ret;
@@ -303,9 +297,10 @@ rtsp_demo_handle rtsp_new_demo (int port)
 
 	memset(&inaddr, 0, sizeof(inaddr));
 	inaddr.sin_family = AF_INET;
+	//inaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	inaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	inaddr.sin_port = htons(port);
-	ret = bind(socket, (struct sockaddr*)&inaddr, sizeof(inaddr));
+	ret = bind(sockfd, (struct sockaddr*)&inaddr, sizeof(inaddr));
 	if (ret < 0)
 	{
 		err("bind socket to address failed : %s\n",strerror(errno));
@@ -314,7 +309,7 @@ rtsp_demo_handle rtsp_new_demo (int port)
 		return NULL;
 	}
 
-	ret = listen(socket, 100);
+	ret = listen(sockfd, 100);
 	if (ret < 0)
 	{
 		err("listen socket failed:%s\n",strerror(errno));
@@ -323,7 +318,7 @@ rtsp_demo_handle rtsp_new_demo (int port)
 		return NULL;
 	}
 
-	d->socket = socket;
+	d->sockfd = sockfd;
 
 	info("rtsp server demo starting on port %d\n",port);
 	return (rtsp_demo_handle)d;
@@ -391,7 +386,7 @@ static int rtsp_set_client_socket (int sockfd)
 	int keepcount = 5;
 	struct linger ling;
 
-	ret = fcntl(socket, F_GETFL, 0);
+	ret = fcntl(sockfd, F_GETFL, 0);
 	if (ret < 0)
 	{
 		warn("fcntl F_GETFL failed\n");
@@ -399,7 +394,7 @@ static int rtsp_set_client_socket (int sockfd)
 	else
 	{
 		ret |= O_NONBLOCK;
-		ret  = fcntl(socket, F_GETFL, ret);
+		ret  = fcntl(sockfd, F_GETFL, ret);
 		if (ret < 0)
 		{
 			warn("fcntl F_SETFL failed\n");
@@ -459,7 +454,7 @@ static struct rtsp_client_connection *rtsp_new_client_connection (struct rtsp_de
 
 	sockfd = ret;
 	rtsp_set_client_socket(sockfd);
-	info("new rtsp client %s:%u coming\n",inet_ntoa(inaddr.sin_addr,ntohs(inaddr.sin_port)));
+	info("new rtsp client %s:%u coming\n",inet_ntoa(inaddr.sin_addr),ntohs(inaddr.sin_port));
 
 	cc = __alloc_client_connection(d);
 	if (cc == NULL)
@@ -480,11 +475,11 @@ static void rtsp_del_client_connection(struct rtsp_client_connection *cc)
 	if (cc)
 	{
 		info("delete client %d\n",cc->sockfd);
-		__client_connection_ubind_session(cc);
+		__client_connection_unbind_session(cc);
 		rtsp_del_rtp_connection(cc,0);
 		rtsp_del_rtp_connection(cc,1);
 		closesocket(cc->sockfd);
-		__free_client_conection(cc);
+		__free_client_connection(cc);
 	}
 }
 
@@ -499,7 +494,7 @@ rtsp_session_handle rtsp_new_session (rtsp_demo_handle demo,const char *path,int
 		return NULL;
 	}
 
-	TAILQ_FOREACH(s,&d->session_qhead,demo_entry)
+	TAILQ_FOREACH(s, &d->sessions_qhead, demo_entry)
 	{
 		if (strstr(path, s->path) || strstr(s->path,path))
 		{
@@ -547,7 +542,7 @@ void rtsp_del_session (rtsp_session_handle session)
 	if (s)
 	{
 		struct rtsp_client_connection *cc;
-		while((cc = TAILQ_FIRST(&s->connection_qhead)))
+		while((cc = TAILQ_FIRST(&s->connections_qhead)))
 		{
 			rtsp_del_client_connection(cc);
 		}
@@ -602,17 +597,17 @@ static int rtsp_handle_OPTIONS(struct rtsp_client_connection *cc,const rtsp_msg_
 
 static int rtsp_handle_DESCRIBE(struct rtsp_client_connection *cc, const rtsp_msg_s *reqmsg, rtsp_msg_s *resmsg)
 {
-	struct rtsp_sesion *s = cc->session;
+	struct rtsp_session *s = cc->session;
 	char sdp[512] = "";
 	int len = 0;
 	uint32_t accept = 0;
 	const rtsp_msg_uri_s *puri = &reqmsg->hdrs.startline.reqline.uri;
 	char uri[128] = "";
 
-	dgb("\n");
+	dbg("\n");
 	if (rtsp_msg_get_accept(reqmsg, &accept) < 0 && !(accept & RTSP_MSG_ACCEPT_SDP))
 	{
-		rtsp_msg_get_response(resmsg, 406);
+		rtsp_msg_set_response(resmsg, 406);
 		warn("client not support accpet SDP\n");
 		return 0;
 	}
@@ -628,10 +623,10 @@ static int rtsp_handle_DESCRIBE(struct rtsp_client_connection *cc, const rtsp_ms
 	strcat(uri, s->path);
 
 	len = build_simple_sdp(sdp, sizeof(sdp), uri, s->has_video, s->has_audio,
-			s->h264_sps, s->h264_spd_len, s->h264_pps, s->h264_pps_len);
-	rtsp_msg_get_content_type(resmsg<RTSP_MSG_CONTENT_TYPE_SDP);
+		s->h264_sps, s->h264_sps_len, s->h264_pps, s->h264_pps_len);
+	rtsp_msg_get_content_type(resmsg, RTSP_MSG_CONTENT_TYPE_SDP);
 	rtsp_msg_set_content_length(resmsg, len);
-	resmsg->body = rtsp_mem_dup(sdp, len);
+	resmsg->body.body = rtsp_mem_dup(sdp, len);
 	return 0;
 }
 
@@ -647,7 +642,7 @@ static int __rtsp_rtcp_socket(int *rtpsock, int *rtcpsock, const char *peer_ip, 
 
 	for ( i = 65536/4*3/2*2; i< 65536; i += 2)
 	{
-		struct socketadd_in inaddr;
+		struct sockaddr_in inaddr;
 		uint16_t port;
 
 		*rtcpsock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -671,7 +666,7 @@ static int __rtsp_rtcp_socket(int *rtpsock, int *rtcpsock, const char *peer_ip, 
 		inaddr.sin_addr.s_addr = htol(INADDR_ANY);
 		inaddr.sin_port = ttons(port);
 		ret = bind(rtpsock, (struct sockaddr*)&inaddr, sizeof(inaddr));
-		if (ret ，　０)
+		if (ret < 0)
 		{
 			closesocket(*rtpsock);
 			closesocket(*rtcpsock);
@@ -731,7 +726,7 @@ static int rtsp_new_rtp_connection(struct rtsp_client_connection *cc, const char
 	struct rtp_connection *rtp;
 	int ret;
 
-	rtp = (struct rtp_connection) calloc(1, sizeof(struct rtp_connection));
+	rtp = (struct rtp_connection*) calloc(1, sizeof(struct rtp_connection));
 	if (rtp == NULL)
 	{
 		err("alloc mem for rtp session failed:%s\n",strerror(errno));
@@ -743,7 +738,7 @@ static int rtsp_new_rtp_connection(struct rtsp_client_connection *cc, const char
 
 	if (istcp)
 	{
-		rtp->udp_sockfd = cc->sockfd;
+		rtp->tcp_sockfd = cc->sockfd;
 		rtp->tcp_interleaved = peer_port_interleaved;
 		ret = rtp->tcp_interleaved;
 	}
@@ -958,7 +953,7 @@ static int rtsp_process_request(struct rtsp_client_connection *cc, const rtsp_ms
 
 	if (s)
 	{
-		if (strcmp(path, s->path,strlen(s->path)))
+		if (strncmp(path, s->path, strlen(s->path)))
 		{
 			warn("Not allow modify path %s (old:%s)\n",path, s->path);
 			rtsp_msg_get_response(resmsg, 451);
@@ -969,7 +964,7 @@ static int rtsp_process_request(struct rtsp_client_connection *cc, const rtsp_ms
 	{
 		TAILQ_FOREACH(s,&d->sessions_qhead, demo_entry)
 		{
-			if (0 == strcmp(path, s->path, strlen(s->path)))
+			if (0 == strncmp(path, s->path, strlen(s->path)))
 				break;
 		}
 
@@ -992,7 +987,7 @@ static int rtsp_process_request(struct rtsp_client_connection *cc, const rtsp_ms
 
 	if (cc->state != RTSP_CC_STATE_INIT)
 	{
-		if (rtsp_msg_get_session(reqmsg, *session) < 0 || session != cc->session_id)
+		if (rtsp_msg_get_session(reqmsg, &session) < 0 || session != cc->session_id)
 		{
 			warn("Invalid Session field\n");
 			rtsp_msg_set_response(resmsg, 454);
@@ -1190,7 +1185,7 @@ static int rtsp_tx_data (struct rtp_connection *c, const uint8_t *data,int size)
 	uint8_t szbuf[4];
 	if (c->is_over_tcp)
 	{
-		sockfd = c->tcp_socket;
+		sockfd = c->tcp_sockfd;
 		szbuf[0] = '$';
 		szbuf[1] = c->tcp_interleaved;
 		*((uint16_t*)&szbuf[2]) = htons(size);
@@ -1393,13 +1388,9 @@ int rtsp_tx_audio (rtsp_session_handle session, const uint8_t *frame, int len, u
 
 		for (i = 0; i < count; i++)
 		{
-			*(uint32_t*)(&packets[i][8]) = htonl(cc->artp->ssrc);
-			for (i = 0; i < count; i++)
-			{
-				*((uint32_t*)(&packets[i][8])) = htonl(cc->artp->ssrc); //modify ssrc
-				if (rtp_tx_data(cc->artp, packets[i], pktsizs[i]) < 0)
-					break;
-			}
+			*((uint32_t*)(&packets[i][8])) = htonl(cc->artp->ssrc); //modify ssrc
+			if (rtp_tx_data(cc->artp, packets[i], pktsizs[i]) < 0)
+				break;
 		}
 	}
 	return len;

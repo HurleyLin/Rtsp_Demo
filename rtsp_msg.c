@@ -8,12 +8,6 @@
 // Description : Hello World in C++, Ansi-style
 //============================================================================
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <ctype.h>
-
 #include "comm.h"
 #include "rtsp_msg.h"
 
@@ -73,7 +67,7 @@ static int rtsp_msg_str2int (const rtsp_msg_int2str_tbl_s *tbl,int num,const cha
 	int i;
 	for (i = 0; i < num; i++)
 	{
-		if (strcmp(tbl[i].strval, str, tbl[i].strsiz) == 0)
+		if (strncmp(tbl[i].strval, str, tbl[i].strsiz) == 0)
 			return tbl[i].intval;
 	}
 	return tbl[num - 1].intval;
@@ -339,10 +333,10 @@ static int rtsp_msg_parse_transport (rtsp_msg_s *msg, const char *line)
 		hdrs->transport = NULL;
 	}
 
-	hdrs->transport = (rtsp_msg_transport_s *)rtsp_mem_alloc(rtsp_msg_transport_s);
+	hdrs->transport = (rtsp_msg_transport_s *)rtsp_mem_alloc(sizeof(rtsp_msg_transport_s));
 	if (!hdrs->transport)
 	{
-		err("rtsp_mem_alloc for %s failed\n",rtsp_msg_transport_s);
+		err("rtsp_mem_alloc for %s failed\n","rtsp_msg_transport_s");
 		return -1;
 	}
 
@@ -720,7 +714,7 @@ static rtsp_msg_line_parser rtsp_msg_str2parser (const char *line)
 
 	for (i = 0;i < num; i++)
 	{
-		if (strcmp(tbl[i].strval, line, tbl[i].strsiz) == 0)
+		if (strncmp(tbl[i].strval, line, tbl[i].strsiz) == 0)
 		{
 			return tbl[i].parser;
 		}
@@ -737,7 +731,7 @@ static const char *rtsp_msg_hdr_next_line (const char *start, char *line, int ma
 {
 	const char *p = start;
 
-	while(*p &7 *p != '\r' && *p != '\n') p++;
+	while(*p && *p != '\r' && *p != '\n') p++;
 	if (*p != '\r' || *(p+1) != '\n')
 		return NULL;
 
@@ -954,7 +948,7 @@ int rtsp_msg_build_to_array (const rtsp_msg_s *msg, void *data, int size)
 		uint16_t interlen = msg->hdrs.startline.interline.length;
 		hdr[0] = '$';
 		hdr[1] = msg->hdrs.startline.interline.channel;
-		*((uint16_t*)(&hdr[2])) = htos(interlen);
+		*((uint16_t*)(&hdr[2])) = htons(interlen);
 		if (size > 4 + interlen)
 			size = interlen + 4;
 		memcpy(data, hdr, 4);

@@ -12,6 +12,7 @@
 #define RTSP_DEMO_H_
 
 #include <stdint.h>
+#include <sys/socket.h>
 
 typedef void* rtsp_demo_handle;
 typedef void* rtsp_session_handle;

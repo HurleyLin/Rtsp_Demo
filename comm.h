@@ -12,6 +12,13 @@
 #define COMM_H_
 
 #include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <time.h>
+#include <ctype.h>
+#include <fcntl.h>
 
 #define dbg(fmt,arg ...) \
 do{\
