@@ -1307,11 +1307,103 @@ static const uint8_t *rtsp_find_h264_nalu (const uint8_t *buff, int len,uint8_t 
 	return s;
 }
 
+static int rtsp_tx_video_internal (struct rtsp_session *s, const uint8_t *frame, int len, uint64_t ts)
+{
+	struct rtsp_client_connection *cc = NULL;
+	uint8_t *packets[RTP_MAX_NBPKTS] = {NULL};
+	int pktsizs[RTP_MAX_NBPKTS] = {0};
+	int count, i;
 
+	rtsp_try_set_sps_pps(s, frame, len);
 
+	count  = rtp_enc_h264(&s->vrtpe, frame, len, ts, packets, pktsizs);
+	if (count <= 0)
+	{
+		err("rtp_enc_h264 ret = %d\n",count);
+		return -1;
+	}
 
+	TAILQ_FOREACH(cc, &s->connections_qhead, session_entry)
+	{
+		if (cc->state != RTSP_CC_STATE_PLAYING || !cc->vrtp)
+			continue;
 
+		for (i = 0; i < count; i++)
+		{
+			*((uint32_t*)(&packets[i][8])) = htonl(cc->vrtp->ssrc); 	//modify ssrc
+			if (rtp_tx_data(cc->vrtp, packets[i], pktsizs[i]) < 0)
+				break;
+		}
+	}
 
+	return len;
+}
+
+int rtsp_tx_video (rtsp_session_handle session, const uint8_t *frame, int len, uint64_t ts)
+{
+	struct rtsp_session *s = (struct rtsp_session*) session;
+	int ret = 0;
+
+	if (!s || !frame || !s->has_video)
+	{
+		return -1;
+	}
+
+	while (len > 0)
+	{
+		const uint8_t *start = NULL;
+		uint8_t type = 0;
+		int size = 0;
+		start = rtsp_find_h264_nalu(frame, len, &type, &size);
+		if (!start)
+		{
+			warn("not found nal header\n");
+			break;
+		}
+
+		ret += rtsp_tx_video_internal(s, start, size, ts);
+		len -= (start - frame) + size;
+		frame = start + size;
+	}
+	return ret;
+}
+
+int rtsp_tx_audio (rtsp_session_handle session, const uint8_t *frame, int len, uint64_t ts)
+{
+	struct rtsp_session *s = (struct rtsp_session*) session;
+	struct rtsp_client_connection *cc = NULL;
+	uint8_t *packets[RTP_MAX_NBPKTS] = {NULL};
+	int pktsizs[RTP_MAX_NBPKTS] = {0};
+	int count, i;
+
+	if (!s || frame || !s->has_audio)
+		return -1;
+
+	count = rtsp_enc_g711(&s->artpe, frame, len, ts, packets, pktsizs);
+	if (count <=0)
+	{
+		err("rtp_enc_g711 ret = %d\n",count);
+		return -1;
+	}
+
+	TAILQ_FOREACH(cc, &s->connections_qhead, session_entry)
+	{
+		if (cc->state != RTSP_CC_STATE_PLAYING || !cc->artp)
+			continue;
+
+		for (i = 0; i < count; i++)
+		{
+			*(uint32_t*)(&packets[i][8]) = htonl(cc->artp->ssrc);
+			for (i = 0; i < count; i++)
+			{
+				*((uint32_t*)(&packets[i][8])) = htonl(cc->artp->ssrc); //modify ssrc
+				if (rtp_tx_data(cc->artp, packets[i], pktsizs[i]) < 0)
+					break;
+			}
+		}
+	}
+	return len;
+}
 
 
 
