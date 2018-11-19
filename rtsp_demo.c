@@ -1046,7 +1046,7 @@ static int rtsp_recv_msg(struct rtsp_client_connection *cc, rtsp_msg_s *msg)
 		err("Invaild frame\n");
 		return -1;
 	}
-	if　(ret == 0)
+	if (ret == 0)
 	{
 		return 0;
 	}
@@ -1054,14 +1054,258 @@ static int rtsp_recv_msg(struct rtsp_client_connection *cc, rtsp_msg_s *msg)
 	memmove(cc->reqbuf, cc->reqbuf + ret, cc->reqlen - ret);
 	cc->reqlen -= ret;
 	return ret;
-
 }
 
+static int resp_send_msg (struct rtsp_client_connection *cc, rtsp_msg_s *msg)
+{
+	char szbuf[1024] = "";
+	int ret = rep_msg_build_to_array(msg, szbuf, sizeof(szbuf));
+	if (ret < 0)
+	{
+		err("rtsp response send failed:%s\n",strerror(errno));
+		return -1;
+	}
 
+	ret = send(cc->sockfd, szbuf, ret, 0);
+	if (ret < 0)
+	{
+		err("rtsp response send failed:%s\n",strerror(errno));
+		return -1;
+	}
+	return ret;
+}
 
+int resp_do_event (rtsp_demo_handle demo)
+{
+	struct rtsp_demo *d = (struct rtsp_demo*)demo;
+	struct rtsp_client_connection *cc = NULL;
+	rtsp_msg_s reqmsg,resmsg;
+	struct timeval tv;
+	fd_set rfds;
+	int maxfd, ret;
 
+	if (NULL == d)
+		return -1;
 
+	FD_ZERO(&rfds);
+	FD_SET(d->sockfd, &rfds);
 
+	maxfd = d->sockfd;
+	TAILQ_FOREACH(cc, &d->connections_qhead, demo_entry)
+	{
+		FD_SET(cc->sockfd, &rfds);
+		if (cc->sockfd > maxfd)
+			maxfd = cc->sockfd;
+		if (cc->vrtp)
+		{
+			// TODO add video rtcp sock to rfds
+		}
+		if (cc->artp)
+		{
+			//TODO add audio rtcp sock to rfds
+		}
+	}
+	memset(&tv, 0, sizeof(tv));
+	tv.tv_sec = 0;
+	tv.tv_usec = 0;
+
+	ret = select(maxfd +1, &rfds, NULL, NULL, &tv);
+	if (ret < 0)
+	{
+		err("selecy=t failed:%s\n",strerror(errno));
+		return -1;
+	}
+	if (ret == 0)
+		return 0;
+
+	if (FD_ISSET(d->sockfd, &rfds))
+	{
+		//add new client_connection
+		rtsp_new_client_connection(d);
+	}
+
+	cc = TAILQ_FIRST(&d->connections_qhead);
+	while (cc)
+	{
+		struct rtsp_client_connection *cc1 = cc;
+		cc = TAILQ_NEXT(cc, demo_entry);
+
+		if (cc1->vrtp)
+		{
+			//TODO process video rtcp socket
+		}
+		if (cc1->artp)
+		{
+			//TODo process audio rtcp socket
+		}
+
+		if (!FD_ISSET(cc->sockfd, &rfds))
+		{
+			continue;
+		}
+
+		rtsp_msg_init(&reqmsg);
+		rtsp_msg_init(&resmsg);
+
+		ret = rtsp_recv_msg(cc1, &reqmsg);
+		if (ret < 0)
+			continue;
+		if (ret < 0)
+		{
+			rtsp_del_client_connection(cc1);
+			continue;
+		}
+
+		if (reqmsg.type == RTSP_MSG_TYPE_INTERLEAVED)
+		{
+			warn("TODO peocess interleaved frame\n");
+			rtsp_msg_free(&reqmsg);
+			continue;
+		}
+
+		if (reqmsg.type != RTSP_MSG_TYPE_REQUEST)
+		{
+			err("not request frame\n");
+			rtsp_msg_free(&reqmsg);
+			continue;
+		}
+
+		ret = rtsp_process_request(cc1, &reqmsg, &resmsg);
+		if (ret < 0)
+			err("request internal err\n");
+		else
+			rtsp_send_msg(cc1, &resmsg);
+
+		rtsp_msg_free(&reqmsg);
+		rtsp_msg_free(&reqmsg);
+	}
+	return 1;
+}
+
+static int rtsp_tx_data (struct rtp_connection *c, const uint8_t *data,int size)
+{
+	int sockfd = c->udp_sockfd[0];
+	int ret;
+
+	uint8_t szbuf[4];
+	if (c->is_over_tcp)
+	{
+		sockfd = c->tcp_socket;
+		szbuf[0] = '$';
+		szbuf[1] = c->tcp_interleaved;
+		*((uint16_t*)&szbuf[2]) = htons(size);
+		ret = send(sockfd, (const char*)szbuf, 4, 0);
+		if (ret < 0)
+		{
+			err("rtp send interlaced frame failed:%s\n",strerror(errno));
+			return -1;
+		}
+	}
+
+	ret = send(sockfd, (const char*)data, size, 0);
+	if (ret < 0)
+	{
+		err("rtp send %d bytes failed:%s\n",size, strerror(errno));
+		return -1;
+	}
+
+	return size;
+}
+
+static int rtsp_try_set_sps_pps (struct rtsp_session *s,const uint8_t *frame, int len)
+{
+	uint8_t type = 0;
+	if (s->h264_sps_len > 0 && s->h264_pps_len > 0)
+		return 0;
+
+	if (frame[0] == 0 && frame[1] == 0 && frame[2] == 1)
+	{
+		type = frame[3] & 0x1f;
+		frame += 3;
+		len -= 3;
+	}
+
+	if (frame[0] == 0 && frame[1] == 0 && frame[2] == 0 && frame[3] == 1)
+	{
+		type = frame[4] & 0x1f;
+		frame += 4;
+		len -= 4;
+	}
+
+	if (len < 1)
+		return -1;
+
+	if (type == 7 && 0 == s->h264_sps_len)
+	{
+		dbg("sps %d\n",len);
+		if (len > sizeof(s->h264_sps))
+			len = sizeof(s->h264_sps);
+		memcpy(s->h264_sps, frame, len);
+		s->h264_sps_len = len;
+	}
+
+	if (type == 8 && 0 == s->h264_pps_len)
+	{
+		dgb("sps %d\n",len);
+		if (len > sizeof(s->h264_pps))
+			len = sizeof(s->h264_pps);
+		memcpy(s->h264_pps, frame, len);
+		s->h264_pps_len = len;
+	}
+	return 0;
+}
+
+static const uint8_t *rtsp_find_h264_nalu (const uint8_t *buff, int len,uint8_t *type, int *size)
+{
+	const uint8_t *s = NULL;
+	while (len >= 3)
+	{
+		if (buff[0] == 0 && buff[1] == 0 && buff[2] == 1)
+		{
+			if (!s)
+			{
+				if (len < 4)
+					return NULL;
+				s = buff;
+				*type = buff[3] & 0x1f;
+			}
+			else
+			{
+				*size = (buff - s);
+				return s;
+			}
+			buff += 3;
+			len -= 3;
+			continue;
+		}
+
+		if (len >= 4 && buff[0] == 0 && buff[1] == 0 && buff[2] == 0&& buff[3] == 1)
+		{
+			if (!s)
+			{
+				if (len < 5)
+					return NULL;
+				s= buff;
+				*type = buff[4] & 0x1f;
+			}
+			else
+			{
+				*size = (buff - s);
+				return s;
+			}
+			buff += 4;
+			len -= 4;
+			continue;
+		}
+		buff++;
+		len--;
+	}
+
+	if (!s)
+		return NULL;
+	*size = (buff - s + len);
+	return s;
+}
 
 
 
