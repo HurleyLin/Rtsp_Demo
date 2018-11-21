@@ -318,7 +318,7 @@ rtsp_demo_handle rtsp_new_demo (int port)
 		return NULL;
 	}
 
-	ret = listen(sockfd, 100); //XXX
+	ret = listen(sockfd, 100);
 	if (ret < 0) {
 		err("listen socket failed : %s\n", strerror(errno));
 		closesocket(sockfd);
