@@ -1,12 +1,13 @@
-//============================================================================
-// Name        : rtp_enc.c
-// Author      : Hurley
-// Mail		   : 1150118636@qq.com
-// Version     : 1.0.0
-// Create On   : Nov 19, 2018
-// Copyright   : Copyright (c) 2018 Hurley All rights reserved.
-// Description : Hello World in C++, Ansi-style
-//============================================================================
+/*************************************************************************
+	> File Name: rtp_enc.c
+	> Author: bxq
+	> Mail: 544177215@qq.com 
+	> Created Time: Saturday, December 19, 2015 PM09:16:04 CST
+ ************************************************************************/
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "comm.h"
 #include "rtp_enc.h"
@@ -35,11 +36,11 @@ struct rtphdr
 
 #define RTPHDR_SIZE (12)
 
-int rtp_enc_init (rtp_enc *e,uint16_t pktsiz, uint16_t nbpkts)
+int rtp_enc_init (rtp_enc *e, uint16_t pktsiz, uint16_t nbpkts)
 {
 	if (!e || !pktsiz || !nbpkts)
 		return -1;
-	e->szbuf = (uint8_t*) malloc(pktsiz *nbpkts);
+	e->szbuf = (uint8_t*) malloc(pktsiz * nbpkts);
 	if (!e->szbuf)
 		return -1;
 	e->pktsiz = pktsiz;
@@ -47,32 +48,32 @@ int rtp_enc_init (rtp_enc *e,uint16_t pktsiz, uint16_t nbpkts)
 	return 0;
 }
 
-int rtp_enc_h264 (rtp_enc *e,const uint8_t *frame, int len, uint64_t ts,uint8_t *packets[], int pktsizs[])
+int rtp_enc_h264 (rtp_enc *e, const uint8_t *frame, int len, uint64_t ts, uint8_t *packets[], int pktsizs[])
 {
 	int count = 0;
 	uint8_t nalhdr;
-	uint32_t rtp_ts;
+    uint32_t rtp_ts;
 
 	if (!e || !e->szbuf)
 		return -1;
 
-	if (frame[0] == 0 && frame[1] == 0 && frame[2] == 1)
-	{
-		frame += 3;
-		len -= 3;
-	}
+	if (!frame || len <= 0 || !packets || !pktsizs)
+		return -1;
 
-	if (frame[0] == 0 && frame[1] == 0 && frame[2] == 0 && frame[3] == 1)
-	{
+	//drop 0001
+	if (frame[0] == 0 && frame[1] == 0 && frame[2] == 1) {
+		frame += 3;
+		len   -= 3;
+	}
+	if (frame[0] == 0 && frame[1] == 0 && frame[2] == 0 && frame[3] == 1) {
 		frame += 4;
-		len -= 4;
+		len   -= 4;
 	}
 
 	nalhdr = frame[0];
 	rtp_ts = (uint32_t)(ts * e->sample_rate / 1000000);
 
-	while (len > 0 && count < e->nbpkts)
-	{
+	while (len > 0 && count < e->nbpkts) {
 		struct rtphdr *hdr = NULL;
 		int pktsiz = 0;
 		packets[count] = e->szbuf + e->pktsiz * count;
@@ -88,57 +89,49 @@ int rtp_enc_h264 (rtp_enc *e,const uint8_t *frame, int len, uint64_t ts,uint8_t 
 		hdr->ts = htonl(rtp_ts);
 		hdr->ssrc = htonl(e->ssrc);
 
-		if (count == 0 && len <= pktsiz - RTPHDR_SIZE)
-		{
-			memcpy(packets[count] + RTPHDR_SIZE, frame ,len);
+		if (count == 0 && len <= pktsiz - RTPHDR_SIZE) {
+			memcpy(packets[count] + RTPHDR_SIZE, frame, len);
 			pktsizs[count] = RTPHDR_SIZE + len;
 			frame += len;
 			len -= len;
-		}
-		else
-		{
+		} else {
 			int mark = 0;
-			if (count == 0)
-			{
-				frame ++;
+			if (count == 0) {
+				frame ++; //drop nalu header
 				len --;
-			}
-			else if(len<= pktsiz - RTPHDR_SIZE -2)
+			} else if (len <= pktsiz - RTPHDR_SIZE - 2) {
 				mark = 1;
-
+			}
 			hdr->m = mark;
 
-			packets[count][RTPHDR_SIZE + 0] = (nalhdr & 0xe0) | 28;
-			packets[count][RTPHDR_SIZE + 1] = (nalhdr & 0X1F);
+			packets[count][RTPHDR_SIZE + 0] = (nalhdr & 0xe0) | 28;//FU-A
+			packets[count][RTPHDR_SIZE + 1] = (nalhdr & 0x1f);//FU-A
+			if (count == 0) {
+				packets[count][RTPHDR_SIZE + 1] |= 0x80; //S
+			}
 
-			if (count == 0)
-				packets[count][RTPHDR_SIZE + 1] |= 0X80;
-
-			if (mark)
-			{
-				packets[count][RTPHDR_SIZE + 1] |= 0X40;
+			if (mark) {
+				packets[count][RTPHDR_SIZE + 1] |= 0x40; //E
 				memcpy(packets[count] + RTPHDR_SIZE + 2, frame, len);
 				pktsizs[count] = RTPHDR_SIZE + 2 + len;
 				frame += len;
 				len -= len;
-			}
-			else
-			{
+			} else {
 				memcpy(packets[count] + RTPHDR_SIZE + 2, frame, pktsiz - RTPHDR_SIZE - 2);
 				pktsizs[count] = pktsiz;
-				frame += pktsiz - RTPHDR_SIZE -2;
-				len -= pktsiz - RTPHDR_SIZE -2;
+				frame += pktsiz - RTPHDR_SIZE - 2;
+				len -= pktsiz - RTPHDR_SIZE - 2;
 			}
 		}
-		count++;
+		count ++;
 	}
 	return count;
 }
 
-int rtp_enc_g711 (rtp_enc *e, const uint8_t *frame, int len, uint64_t ts,uint8_t *packets[], int pktsizs[])
+int rtp_enc_g711 (rtp_enc *e, const uint8_t *frame, int len, uint64_t ts, uint8_t *packets[], int pktsizs[])
 {
 	int count = 0;
-	uint32_t rtp_ts;
+    uint32_t rtp_ts;
 
 	if (!e || !e->szbuf)
 		return -1;
@@ -146,9 +139,8 @@ int rtp_enc_g711 (rtp_enc *e, const uint8_t *frame, int len, uint64_t ts,uint8_t
 	if (!frame || len <= 0 || !packets || !pktsizs)
 		return -1;
 
-	rtp_ts = (uint32_t)(ts *e->sample_rate / 1000000);
-	while (len > 0 && count < e->nbpkts)
-	{
+	rtp_ts = (uint32_t)(ts * e->sample_rate / 1000000);
+	while (len > 0 && count < e->nbpkts) {
 		struct rtphdr *hdr = NULL;
 		int pktsiz = 0;
 		packets[count] = e->szbuf + e->pktsiz * count;
@@ -158,27 +150,24 @@ int rtp_enc_g711 (rtp_enc *e, const uint8_t *frame, int len, uint64_t ts,uint8_t
 		hdr->p = 0;
 		hdr->x = 0;
 		hdr->cc = 0;
-		hdr->m = (e->seq == 00);
+		hdr->m = (e->seq == 0);
 		hdr->pt = e->pt;
 		hdr->seq = htons(e->seq++);
-		hdr->ts = htonl(rtp_ts);
+		hdr->ts  = htonl(rtp_ts);
 		hdr->ssrc = htonl(e->ssrc);
 
-		if (len <= pktsiz - RTPHDR_SIZE)
-		{
+		if (len <= pktsiz - RTPHDR_SIZE) {
 			memcpy(packets[count] + RTPHDR_SIZE, frame, len);
 			pktsizs[count] = RTPHDR_SIZE + len;
 			frame += len;
 			len -= len;
-		}
-		else
-		{
+		} else {
 			memcpy(packets[count] + RTPHDR_SIZE, frame, pktsiz - RTPHDR_SIZE);
 			pktsizs[count] = pktsiz;
 			frame += pktsiz - RTPHDR_SIZE;
 			len -= pktsiz - RTPHDR_SIZE;
 		}
-		count++;
+		count ++;
 	}
 
 	return count;
@@ -186,16 +175,16 @@ int rtp_enc_g711 (rtp_enc *e, const uint8_t *frame, int len, uint64_t ts,uint8_t
 
 void rtp_enc_deinit (rtp_enc *e)
 {
-	if (e)
-	{
+	if (e) {
 		if (e->szbuf)
 			free(e->szbuf);
 		memset(e, 0, sizeof(rtp_enc));
 	}
 }
 
-
-
-
-
-
+#if 0
+int main()
+{
+	return 0;
+}
+#endif

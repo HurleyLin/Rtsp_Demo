@@ -1,61 +1,35 @@
-//============================================================================
-// Name        : comm.h
-// Author      : Hurley
-// Mail		   : 1150118636@qq.com
-// Version     : 1.0.0
-// Create On   : Oct 13, 2018
-// Copyright   : Copyright (c) 2018 Hurley All rights reserved.
-// Description : Hello World in C++, Ansi-style
-//============================================================================
+/*************************************************************************
+	> File Name: comm.h
+	> Author: bxq
+	> Mail: 544177215@qq.com 
+	> Created Time: Sunday, December 20, 2015 AM07:37:50 CST
+ ************************************************************************/
 
-#ifndef COMM_H_
-#define COMM_H_
+#ifndef __COMM_H__
+#define __COMM_H__
 
+#include <stdio.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <time.h>
-#include <ctype.h>
 #include <fcntl.h>
-
-#define dbg(fmt,arg ...) \
-do{\
-	printf("\033[1;33m[DEBUG %s:%s:%d]:"fmt,__FILE__,__FUNCTION__,__LINE__,##arg);\
-	printf("\033[0;39m\n");\
-}while(0)
-
-#define info(fmt,arg ...) \
-do{\
-	printf("\033[1;32m[INFO %s:%s:%d]:"fmt,__FILE__,__FUNCTION__,__LINE__,##arg);\
-	printf("\033[0;39m\n");\
-}while(0)
-
-#define warn(fmt,arg ...) \
-do{\
-	printf("\033[1;34m[WARN %s:%s:%d]:"fmt,__FILE__,__FUNCTION__,__LINE__,##arg);\
-	printf("\033[0;39m\n");\
-}while(0)
-
-#define ERR(fmt,arg ...) \
-do{\
-	printf("\033[1;31m[ERROR %s:%s:%d]:"fmt,__FILE__,__FUNCTION__,__LINE__,##arg);\
-	printf("\033[0;39m\n");\
-}while(0)
-
-
+#include <time.h>
 #define __LINUX__ 1
 
+#define dbg(fmt, ...) do {printf("[DEBUG %s:%d:%s] " fmt, __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);} while(0)
+#define info(fmt, ...) do {printf("[INFO  %s:%d:%s] " fmt, __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);} while(0)
+#define warn(fmt, ...) do {printf("[WARN  %s:%d:%s] " fmt, __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);} while(0)
+#define err(fmt, ...) do {printf("[ERROR %s:%d:%s] " fmt, __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);} while(0)
 
 #ifdef __WIN32__
+//#include <windows.h>
 #include <winsock2.h>
 #define MSG_DONTWAIT 0
 #define usleep(x) Sleep((x)/1000)
 #define snprintf _snprintf
 typedef int socklen_t;
 #endif
-
 
 #ifdef __LINUX__
 #include <unistd.h>
@@ -64,6 +38,7 @@ typedef int socklen_t;
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #define closesocket(x) close(x)
+#endif 
+
 #endif
 
-#endif /* COMM_H_ */

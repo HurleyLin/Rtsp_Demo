@@ -1,17 +1,16 @@
-//============================================================================
-// Name        : rtsp_msg.h
-// Author      : Hurley
-// Mail		   : 1150118636@qq.com
-// Version     : 1.0.0
-// Create On   : Nov 14, 2018
-// Copyright   : Copyright (c) 2018 Hurley All rights reserved.
-// Description : Hello World in C++, Ansi-style
-//============================================================================
+/*************************************************************************
+	> File Name: rtsp_msg.h
+	> Author: bxq
+	> Mail: 544177215@qq.com 
+	> Created Time: Friday, December 11, 2015 AM03:31:53 CST
+ ************************************************************************/
 
-#ifndef RTSP_MSG_H_
-#define RTSP_MSG_H_
+#ifndef __RTSP_MSG_H__
+#define __RTSP_MSG_H__
 
 #include <stdint.h>
+
+//RTSP/1.0 Message Parse/Build
 
 typedef enum __rtsp_msg_type_e
 {
@@ -19,7 +18,7 @@ typedef enum __rtsp_msg_type_e
 	RTSP_MSG_TYPE_RESPONSE,
 	RTSP_MSG_TYPE_INTERLEAVED,
 	RTSP_MSG_TYPE_BUTT,
-}rtsp_msg_type_e;
+} rtsp_msg_type_e;
 
 typedef enum __rtsp_msg_method_e
 {
@@ -37,7 +36,7 @@ typedef enum __rtsp_msg_method_e
 	RTSP_MSG_METHOD_BUTT,
 } rtsp_msg_method_e;
 
-typedef enum __rtsp_msg_uri_scheme_e
+typedef enum __rtsp_msg_uri_scheme_e 
 {
 	RTSP_MSG_URI_SCHEME_RTSP = 0,
 	RTSP_MSG_URI_SCHEME_RTSPU,
@@ -78,16 +77,19 @@ typedef struct __rtsp_msg_interleaved_line_s
 	uint8_t  reserved;
 } rtsp_msg_interleaved_line_s;
 
+//CSeq g req. all
 typedef struct __rtsp_msg_cseq_s
 {
 	uint32_t cseq;
 } rtsp_msg_cseq_s;
 
+//Date g opt. all
 typedef struct __rtsp_msg_date_s
 {
 	char http_date[32];
 } rtsp_msg_date_s;
 
+//Session Rr req. all but SETUP,OPTIONS
 typedef struct __rtsp_msg_session_s
 {
 	uint32_t session;
@@ -100,6 +102,7 @@ typedef enum __rtsp_msg_transport_type_e
 	RTSP_MSG_TRANSPORT_TYPE_BUTT,
 } rtsp_msg_transport_type_e;
 
+//Transport Rr req. SETUP
 typedef struct __rtsp_msg_transport_s
 {
 	rtsp_msg_transport_type_e type;
@@ -142,7 +145,7 @@ typedef struct __rtsp_msg_time_utc_s
 {
 	//19961108T142730.25Z
 	uint32_t secords; //1996/11/08 14:27:30 - 1900/1/1 0:0:0
-	uint32_t usecords; //25
+	uint32_t usecords; //25 
 } rtsp_msg_time_utc_s;
 
 //Range Rr opt. PLAY,PAUSE,RECORD
@@ -211,30 +214,34 @@ typedef struct __rtsp_msg_rtp_subinfo_s
 {
 	rtsp_msg_uri_s url;
 	uint32_t isseq;
-	union __param_u
-	{
+	union __param_u {
 		uint32_t rtptime;
 		uint32_t seq;
 	} param;
 } rtsp_msg_rtp_subinfo_s;
 
+//RTP-Info r req. PLAY
 typedef struct __rtsp_msg_rtp_info_s
 {
 	uint32_t ninfos;
 	rtsp_msg_rtp_subinfo_s **info_array;
 } rtsp_msg_rtp_info_s;
 
+//Server r opt. all
 typedef struct __rtsp_msg_server_s
 {
 	char server[64];
 } rtsp_msg_server_s;
 
-
+//Content-Length e req. SET_PARAMETER,ANNOUNCE
+//Content-Length e req. entity
 typedef struct __rtsp_msg_content_length_s
 {
 	uint32_t length;
 } rtsp_msg_content_length_s;
 
+//Content-Type e req. SET_PARAMETER,ANNOUNCE
+//Content-Type r req. entity
 typedef struct __rtsp_msg_content_type_s
 {
 	rtsp_msg_content_type_e type;
@@ -282,6 +289,7 @@ typedef struct __rtsp_msg_s
 	rtsp_msg_body_s body;
 } rtsp_msg_s;
 
+//bases
 void *rtsp_mem_alloc (int size);
 void  rtsp_mem_free (void *ptr);
 void *rtsp_mem_dup (const void *ptr, int size);
@@ -325,5 +333,4 @@ int rtsp_msg_set_content_length (rtsp_msg_s *msg, int length);
 
 
 uint32_t rtsp_msg_gen_session_id (void);
-
-#endif /* RTSP_MSG_H_ */
+#endif
