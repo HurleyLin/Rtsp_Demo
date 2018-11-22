@@ -1,8 +1,8 @@
 /*************************************************************************
-	> File Name: test.c
-	> Author: bxq
-	> Mail: 544177215@qq.com 
-	> Created Time: Saturday, December 12, 2015 PM03:19:12 CST
+	File Name: test.c
+	Author: Hurley
+	Mail: 11508118636@qq.com
+	Created Time: Oct 13, 2018
  ************************************************************************/
 
 #include "comm.h"

@@ -1,8 +1,8 @@
 /*************************************************************************
-	> File Name: comm.h
-	> Author: bxq
-	> Mail: 544177215@qq.com 
-	> Created Time: Sunday, December 20, 2015 AM07:37:50 CST
+	File Name: comm.h
+	Author: Hurley
+	Mail: 11508118636@qq.com
+	Created Time: Oct 13, 2018
  ************************************************************************/
 
 #ifndef __COMM_H__

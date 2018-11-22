@@ -1,8 +1,8 @@
 /*************************************************************************
-	> File Name: rtsp_msg.h
-	> Author: bxq
-	> Mail: 544177215@qq.com 
-	> Created Time: Friday, December 11, 2015 AM03:31:53 CST
+	File Name: rtsp_msg.h
+	Author: Hurley
+	Mail: 11508118636@qq.com
+	Created Time: Oct 13, 2018
  ************************************************************************/
 
 #ifndef __RTSP_MSG_H__

@@ -1,8 +1,8 @@
 /*************************************************************************
-	> File Name: rtp_enc.c
-	> Author: bxq
-	> Mail: 544177215@qq.com 
-	> Created Time: Saturday, December 19, 2015 PM09:16:04 CST
+	File Name: rtp_enc.c
+	Author: Hurley
+	Mail: 11508118636@qq.com
+	Created Time: Oct 13, 2018
  ************************************************************************/
 
 #include "comm.h"

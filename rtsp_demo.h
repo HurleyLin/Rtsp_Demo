@@ -1,8 +1,8 @@
 /*************************************************************************
-	> File Name: rtsp_demo.h
-	> Author: bxq
-	> Mail: 544177215@qq.com 
-	> Created Time: Monday, November 23, 2015 AM12:22:43 CST
+	File Name: rtsp_demo.h
+	Author: Hurley
+	Mail: 11508118636@qq.com
+	Created Time: Oct 13, 2018
  ************************************************************************/
 
 #ifndef __RTSP_DEMO_H__
