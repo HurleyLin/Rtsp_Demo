@@ -5,12 +5,6 @@
 	> Created Time: Monday, November 23, 2015 AM12:34:09 CST
  ************************************************************************/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
-#include <stdint.h>
-
 
 #include "comm.h"
 #include "rtsp_demo.h"

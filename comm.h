@@ -15,6 +15,9 @@
 #include <string.h>
 #include <fcntl.h>
 #include <time.h>
+#include <errno.h>
+#include <ctype.h>
+
 #define __LINUX__ 1
 
 #define dbg(fmt, ...) do {printf("[DEBUG %s:%d:%s] " fmt, __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);} while(0)

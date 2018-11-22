@@ -5,10 +5,6 @@
 	> Created Time: Saturday, December 19, 2015 PM09:16:04 CST
  ************************************************************************/
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "comm.h"
 #include "rtp_enc.h"
 

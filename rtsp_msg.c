@@ -5,11 +5,6 @@
 	> Created Time: Friday, December 11, 2015 AM05:02:48 CST
  ************************************************************************/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <ctype.h>
 
 #include "comm.h"
 #include "rtsp_msg.h"
