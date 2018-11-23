@@ -1039,9 +1039,11 @@ int rtsp_do_event (rtsp_demo_handle demo)
 			maxfd = cc->sockfd;
 		if (cc->vrtp) {
 			//TODO add video rtcp sock to rfds
+			//FD_SET(cc->vrtp->tcp_sockfd,&rfds);
 		}
 		if (cc->artp) {
 			//TODO add audio rtcp sock to rfds
+			//FD_SET(cc->artp->tcp_sockfd,&rfds);
 		}
 	}
 
